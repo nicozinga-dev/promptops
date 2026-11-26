@@ -77,8 +77,8 @@ pub struct UploadFile {
 /// assets:list — lists all the workspace assets.
 /// Mirror of `ASSETS_LIST` → `{ ok, assets }`.
 #[tauri::command]
-pub async fn assets_list(app: tauri::AppHandle, cwd: String) -> Value {
-    let res = match remote_assets(&app, &cwd) {
+pub async fn assets_list(app: tauri::AppHandle, cwd: String, session_id: Option<String>) -> Value {
+    let res = match remote_assets(&app, &cwd, session_id.as_deref()) {
         Some(Ok(r)) => r.list(&app).await,
         Some(Err(e)) => Err(e),
         None => list_assets(&cwd),
@@ -92,8 +92,13 @@ pub async fn assets_list(app: tauri::AppHandle, cwd: String) -> Value {
 /// assets:upload — uploads one or more files to the assets folder.
 /// Mirror of `ASSETS_UPLOAD` → `{ ok, assets }` (`uploaded` collection).
 #[tauri::command]
-pub async fn assets_upload(app: tauri::AppHandle, cwd: String, files: Vec<UploadFile>) -> Value {
-    let remote = match remote_assets(&app, &cwd) {
+pub async fn assets_upload(
+    app: tauri::AppHandle,
+    cwd: String,
+    files: Vec<UploadFile>,
+    session_id: Option<String>,
+) -> Value {
+    let remote = match remote_assets(&app, &cwd, session_id.as_deref()) {
         Some(Ok(r)) => Some(r),
         Some(Err(e)) => return json!({ "ok": false, "error": e }),
         None => None,
@@ -118,8 +123,13 @@ pub async fn assets_upload(app: tauri::AppHandle, cwd: String, files: Vec<Upload
 /// assets:delete — deletes an asset by name.
 /// Mirror of `ASSETS_DELETE` → `{ ok, deleted }`.
 #[tauri::command]
-pub async fn assets_delete(app: tauri::AppHandle, cwd: String, file_name: String) -> Value {
-    let res = match remote_assets(&app, &cwd) {
+pub async fn assets_delete(
+    app: tauri::AppHandle,
+    cwd: String,
+    file_name: String,
+    session_id: Option<String>,
+) -> Value {
+    let res = match remote_assets(&app, &cwd, session_id.as_deref()) {
         Some(Ok(r)) => r.delete(&app, &file_name).await,
         Some(Err(e)) => Err(e),
         None => delete_asset(&cwd, &file_name),
@@ -138,8 +148,9 @@ pub async fn assets_rename(
     cwd: String,
     old_name: String,
     new_name: String,
+    session_id: Option<String>,
 ) -> Value {
-    let res = match remote_assets(&app, &cwd) {
+    let res = match remote_assets(&app, &cwd, session_id.as_deref()) {
         Some(Ok(r)) => r.rename(&app, &old_name, &new_name).await,
         Some(Err(e)) => Err(e),
         None => rename_asset(&cwd, &old_name, &new_name),
@@ -153,8 +164,13 @@ pub async fn assets_rename(
 /// assets:read — reads the asset content as text.
 /// Mirror of `ASSETS_READ` → `{ ok, content }`.
 #[tauri::command]
-pub async fn assets_read(app: tauri::AppHandle, cwd: String, file_name: String) -> Value {
-    let res = match remote_assets(&app, &cwd) {
+pub async fn assets_read(
+    app: tauri::AppHandle,
+    cwd: String,
+    file_name: String,
+    session_id: Option<String>,
+) -> Value {
+    let res = match remote_assets(&app, &cwd, session_id.as_deref()) {
         Some(Ok(r)) => r
             .read_bytes(&app, &file_name)
             .await
@@ -177,6 +193,7 @@ pub async fn assets_import_from_url(
     cwd: String,
     url: String,
     file_name: String,
+    session_id: Option<String>,
 ) -> Value {
     if !url.to_lowercase().starts_with("http://") && !url.to_lowercase().starts_with("https://") {
         return serde_json::json!({ "ok": false, "error": "Only http(s) URLs are allowed" });
@@ -212,7 +229,7 @@ pub async fn assets_import_from_url(
             Err(e) => return serde_json::json!({ "ok": false, "error": e.to_string() }),
         }
     }
-    let res = match remote_assets(&app, &cwd) {
+    let res = match remote_assets(&app, &cwd, session_id.as_deref()) {
         Some(Ok(r)) => r.upload(&app, &file_name, &bytes).await,
         Some(Err(e)) => Err(e),
         None => upload_asset(&cwd, &file_name, &base64_encode(&bytes)),
@@ -232,8 +249,13 @@ const IMPORT_PATH_MAX_BYTES: u64 = 512 * 1024 * 1024;
 /// delivers only `text/uri-list` with no `File` in `dataTransfer.files`, so the
 /// webview passes the paths and Rust reads the content. Regular files only.
 #[tauri::command]
-pub async fn assets_import_paths(app: tauri::AppHandle, cwd: String, paths: Vec<String>) -> Value {
-    let remote = match remote_assets(&app, &cwd) {
+pub async fn assets_import_paths(
+    app: tauri::AppHandle,
+    cwd: String,
+    paths: Vec<String>,
+    session_id: Option<String>,
+) -> Value {
+    let remote = match remote_assets(&app, &cwd, session_id.as_deref()) {
         Some(Ok(r)) => Some(r),
         Some(Err(e)) => return json!({ "ok": false, "error": e }),
         None => None,
@@ -277,8 +299,13 @@ pub async fn assets_import_paths(app: tauri::AppHandle, cwd: String, paths: Vec<
 /// assets:read-base64 — reads the asset as base64 (image preview / AI).
 /// Mirror of `ASSETS_READ_BASE64` → `{ ok, data, mimeType }` (spread of the result).
 #[tauri::command]
-pub async fn assets_read_base64(app: tauri::AppHandle, cwd: String, file_name: String) -> Value {
-    let res = match remote_assets(&app, &cwd) {
+pub async fn assets_read_base64(
+    app: tauri::AppHandle,
+    cwd: String,
+    file_name: String,
+    session_id: Option<String>,
+) -> Value {
+    let res = match remote_assets(&app, &cwd, session_id.as_deref()) {
         Some(Ok(r)) => r
             .read_bytes(&app, &file_name)
             .await
@@ -331,7 +358,12 @@ struct RemoteAssets {
 
 /// `None` = local cwd (unchanged flow). `Some(Err)` = remote but the connection
 /// command is not known (session not started yet in this process).
-fn remote_assets(app: &tauri::AppHandle, cwd: &str) -> Option<Result<RemoteAssets, String>> {
+/// `session_id` picks the host when sessions on different hosts share the cwd.
+fn remote_assets(
+    app: &tauri::AppHandle,
+    cwd: &str,
+    session_id: Option<&str>,
+) -> Option<Result<RemoteAssets, String>> {
     use crate::commands::remote::{parse_cmd_path, parse_remote_path, RemoteTarget};
     use tauri::Manager as _;
     if let Some((conn_id, root)) = parse_remote_path(cwd) {
@@ -343,13 +375,14 @@ fn remote_assets(app: &tauri::AppHandle, cwd: &str) -> Option<Result<RemoteAsset
     let root = parse_cmd_path(cwd)?;
     let command = app
         .state::<Arc<crate::commands::session::SessionManager>>()
-        .remote_command_for_cwd(cwd);
+        .remote_command_for_cwd(cwd, session_id);
     Some(match command {
-        Some(c) => Ok(RemoteAssets {
+        Ok(Some(c)) => Ok(RemoteAssets {
             target: RemoteTarget::Command(c),
             root,
         }),
-        None => Err("Remote session is not connected yet: resume it, then retry.".into()),
+        Ok(None) => Err("Remote session is not connected yet: resume it, then retry.".into()),
+        Err(e) => Err(e),
     })
 }
 
@@ -541,8 +574,9 @@ pub async fn remote_fetch_file(
     cwd: String,
     path: String,
     open: Option<bool>,
+    session_id: Option<String>,
 ) -> Value {
-    let remote = match remote_assets(&app, &cwd) {
+    let remote = match remote_assets(&app, &cwd, session_id.as_deref()) {
         Some(Ok(r)) => r,
         Some(Err(e)) => return json!({ "ok": false, "error": e }),
         None => return json!({ "ok": false, "error": "Not a remote session" }),
@@ -713,8 +747,9 @@ pub async fn remote_outbox_collect(
     app: tauri::AppHandle,
     cwd: String,
     open: Option<bool>,
+    session_id: Option<String>,
 ) -> Value {
-    let remote = match remote_assets(&app, &cwd) {
+    let remote = match remote_assets(&app, &cwd, session_id.as_deref()) {
         Some(Ok(r)) => r,
         Some(Err(e)) => return json!({ "ok": false, "error": e }),
         None => return json!({ "ok": true, "files": [] }),
@@ -767,8 +802,12 @@ const REMOTE_MCP_PY: &str = include_str!("promptops_remote_mcp.py");
 /// Claude CLI (`claude mcp add -s user promptops-remote`). Applies to
 /// Claude sessions started afterwards. → `{ ok, registered }`.
 #[tauri::command]
-pub async fn remote_bridge_setup(app: tauri::AppHandle, cwd: String) -> Value {
-    let remote = match remote_assets(&app, &cwd) {
+pub async fn remote_bridge_setup(
+    app: tauri::AppHandle,
+    cwd: String,
+    session_id: Option<String>,
+) -> Value {
+    let remote = match remote_assets(&app, &cwd, session_id.as_deref()) {
         Some(Ok(r)) => r,
         Some(Err(e)) => return json!({ "ok": false, "error": e }),
         None => return json!({ "ok": false, "error": "Not a remote session" }),
@@ -812,8 +851,12 @@ const REMOTE_BRIDGE_REMOVE_SCRIPT: &str =
 /// remote:bridge-remove — takes the `promptops-remote` MCP server back off the
 /// host (registration and script). → `{ ok, removed }`.
 #[tauri::command]
-pub async fn remote_bridge_remove(app: tauri::AppHandle, cwd: String) -> Value {
-    let remote = match remote_assets(&app, &cwd) {
+pub async fn remote_bridge_remove(
+    app: tauri::AppHandle,
+    cwd: String,
+    session_id: Option<String>,
+) -> Value {
+    let remote = match remote_assets(&app, &cwd, session_id.as_deref()) {
         Some(Ok(r)) => r,
         Some(Err(e)) => return json!({ "ok": false, "error": e }),
         None => return json!({ "ok": false, "error": "Not a remote session" }),

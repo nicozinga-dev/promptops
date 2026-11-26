@@ -1224,23 +1224,41 @@
     onSubAgentReviewDone: function (cb) { return on('subagent:review-done', cb); },
 
     // ── Session Assets ───────────────────────────────────────────────────
-    listAssets: function (cwd) { return call('assets_list', { cwd: cwd }); },
-    uploadAssets: function (cwd, files) { return call('assets_upload', { cwd: cwd, files: files }); },
-    deleteAsset: function (cwd, fileName) { return call('assets_delete', { cwd: cwd, fileName: fileName }); },
-    renameAsset: function (cwd, oldName, newName) {
-      return call('assets_rename', { cwd: cwd, oldName: oldName, newName: newName });
+    listAssets: function (cwd, sessionId) { return call('assets_list', { cwd: cwd, sessionId: sessionId }); },
+    uploadAssets: function (cwd, files, sessionId) {
+      return call('assets_upload', { cwd: cwd, files: files, sessionId: sessionId });
     },
-    readAsset: function (cwd, fileName) { return call('assets_read', { cwd: cwd, fileName: fileName }); },
-    readAssetBase64: function (cwd, fileName) { return call('assets_read_base64', { cwd: cwd, fileName: fileName }); },
-    importAssetFromUrl: function (cwd, url, fileName) {
-      return call('assets_import_from_url', { cwd: cwd, url: url, fileName: fileName });
+    deleteAsset: function (cwd, fileName, sessionId) {
+      return call('assets_delete', { cwd: cwd, fileName: fileName, sessionId: sessionId });
     },
-    importAssetPaths: function (cwd, paths) { return call('assets_import_paths', { cwd: cwd, paths: paths }); },
+    renameAsset: function (cwd, oldName, newName, sessionId) {
+      return call('assets_rename', { cwd: cwd, oldName: oldName, newName: newName, sessionId: sessionId });
+    },
+    readAsset: function (cwd, fileName, sessionId) {
+      return call('assets_read', { cwd: cwd, fileName: fileName, sessionId: sessionId });
+    },
+    readAssetBase64: function (cwd, fileName, sessionId) {
+      return call('assets_read_base64', { cwd: cwd, fileName: fileName, sessionId: sessionId });
+    },
+    importAssetFromUrl: function (cwd, url, fileName, sessionId) {
+      return call('assets_import_from_url', { cwd: cwd, url: url, fileName: fileName, sessionId: sessionId });
+    },
+    importAssetPaths: function (cwd, paths, sessionId) {
+      return call('assets_import_paths', { cwd: cwd, paths: paths, sessionId: sessionId });
+    },
     openAssetsFolder: function (cwd) { return call('assets_open_folder', { cwd: cwd }); },
-    fetchRemoteFile: function (cwd, path, open) { return call('remote_fetch_file', { cwd: cwd, path: path, open: open }); },
-    remoteOutboxCollect: function (cwd, open) { return call('remote_outbox_collect', { cwd: cwd, open: open }); },
-    remoteBridgeSetup: function (cwd) { return call('remote_bridge_setup', { cwd: cwd }); },
-    remoteBridgeRemove: function (cwd) { return call('remote_bridge_remove', { cwd: cwd }); },
+    fetchRemoteFile: function (cwd, path, open, sessionId) {
+      return call('remote_fetch_file', { cwd: cwd, path: path, open: open, sessionId: sessionId });
+    },
+    remoteOutboxCollect: function (cwd, open, sessionId) {
+      return call('remote_outbox_collect', { cwd: cwd, open: open, sessionId: sessionId });
+    },
+    remoteBridgeSetup: function (cwd, sessionId) {
+      return call('remote_bridge_setup', { cwd: cwd, sessionId: sessionId });
+    },
+    remoteBridgeRemove: function (cwd, sessionId) {
+      return call('remote_bridge_remove', { cwd: cwd, sessionId: sessionId });
+    },
 
     // ── Editor ───────────────────────────────────────────────────────────
     detectEditors: function () { return call('editor_detect'); },

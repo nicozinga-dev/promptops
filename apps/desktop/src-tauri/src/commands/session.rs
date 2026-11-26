@@ -7293,25 +7293,46 @@ impl SessionManager {
             .filter(|c| !c.trim().is_empty())
     }
 
-    /// Connection command of the session whose `cmd://…` cwd equals `cwd`:
-    /// commands that receive only the cwd (assets) use it to reach the host.
-    pub(crate) fn remote_command_for_cwd(&self, cwd: &str) -> Option<String> {
+    /// Connection command for a `cmd://…` cwd: the given session's when it has
+    /// that cwd, else the one shared by every session with that cwd.
+    /// `Err` when sessions with the same cwd reach different hosts.
+    pub(crate) fn remote_command_for_cwd(
+        &self,
+        cwd: &str,
+        session_id: Option<&str>,
+    ) -> Result<Option<String>, String> {
         let wanted = cwd.trim_end_matches('/');
+        let local_id = session_id.and_then(|id| self.resolve_local_id(id));
         let guard = self.state.lock();
-        guard.sessions.values().find_map(|s| {
-            let path = s
-                .config
+        let matching = guard.sessions.iter().filter(|(_, s)| {
+            s.config
                 .cwd
                 .as_deref()
-                .or_else(|| s.workspace.as_ref().map(|w| w.path.as_str()))?;
-            if path.trim_end_matches('/') != wanted {
-                return None;
-            }
+                .or_else(|| s.workspace.as_ref().map(|w| w.path.as_str()))
+                .is_some_and(|p| p.trim_end_matches('/') == wanted)
+        });
+        let command_of = |s: &AgentSession| {
             s.config
                 .remote_command
                 .clone()
                 .filter(|c| !c.trim().is_empty())
-        })
+        };
+        let mut commands: Vec<String> = Vec::new();
+        for (id, s) in matching {
+            if local_id.as_deref() == Some(id.as_str()) {
+                return Ok(command_of(s));
+            }
+            if let Some(c) = command_of(s) {
+                if !commands.contains(&c) {
+                    commands.push(c);
+                }
+            }
+        }
+        // Same folder on different hosts: guessing could write on the wrong one.
+        if commands.len() > 1 {
+            return Err("More sessions use this remote folder on different hosts: open the session, then retry.".into());
+        }
+        Ok(commands.pop())
     }
 
     pub(crate) fn parent_info(&self, session_id: &str) -> Option<ParentSessionInfo> {
@@ -8309,6 +8330,45 @@ mod tests {
         // Sub-agent children are never deduplicated.
         assert!(m.insert_or_existing(bare("sub", "Api"), false).is_none());
         assert_eq!(m.list().len(), 2);
+    }
+
+    #[test]
+    fn remote_command_for_cwd_never_picks_another_host() {
+        let remote = |id: &str, cwd: &str, command: &str| {
+            let mut s = bare(id, id);
+            s.config.cwd = Some(cwd.into());
+            s.config.remote_command = Some(command.into());
+            s
+        };
+        let m = with_sessions(vec![
+            remote("staging", "cmd:///home/ubuntu/app", "ssh staging"),
+            remote("prod", "cmd:///home/ubuntu/app/", "ssh prod"),
+            remote("solo", "cmd:///srv/site", "ssh solo"),
+        ]);
+        m.state
+            .lock()
+            .db_ids
+            .insert("prod".into(), "db-prod".into());
+        let cwd = "cmd:///home/ubuntu/app";
+
+        // The session that asks decides the host, by local id or by dbId.
+        assert_eq!(
+            m.remote_command_for_cwd(cwd, Some("staging")),
+            Ok(Some("ssh staging".into()))
+        );
+        assert_eq!(
+            m.remote_command_for_cwd(cwd, Some("db-prod")),
+            Ok(Some("ssh prod".into()))
+        );
+        // Without it (or with a session on another folder) two hosts are ambiguous.
+        assert!(m.remote_command_for_cwd(cwd, None).is_err());
+        assert!(m.remote_command_for_cwd(cwd, Some("solo")).is_err());
+        // One host for the folder: the fallback still works.
+        assert_eq!(
+            m.remote_command_for_cwd("cmd:///srv/site", None),
+            Ok(Some("ssh solo".into()))
+        );
+        assert_eq!(m.remote_command_for_cwd("cmd:///nowhere", None), Ok(None));
     }
 
     #[test]

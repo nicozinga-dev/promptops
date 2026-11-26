@@ -4,7 +4,7 @@ import { SessionAssetsService } from './session-assets.service';
 /**
  * File bridge for remote sessions (cwd `cmd://` / `ssh://`).
  *
- * - Setup (once per cwd and per app launch): installs the `promptops-remote`
+ * - Setup (once per session and cwd, per app launch): installs the `promptops-remote`
  *   MCP server on the host → the remote agent knows it is remote and has
  *   `send_to_local`, which puts files in `.promptops-assets/out/`.
  * - Polls the outbox while the session is the active one: Rust
@@ -19,6 +19,7 @@ export class RemoteBridgeService {
   private static readonly MAX_BACKOFF_MS = 60000;
 
   private cwd: string | null = null;
+  private sessionId: string | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private busy = false;
   private failures = 0;
@@ -32,14 +33,15 @@ export class RemoteBridgeService {
     return (window as any).promptops;
   }
 
-  /** Follows the active session: starts/stops polling when the cwd changes. */
-  watch(cwd: string | null | undefined): void {
+  /** Follows the active session: starts/stops polling when the session or its cwd changes. */
+  watch(cwd: string | null | undefined, sessionId: string | null = null): void {
     const next = RemoteBridgeService.isRemote(cwd) && this.api?.remoteOutboxCollect ? cwd : null;
-    if (next === this.cwd) return;
+    if (next === this.cwd && sessionId === this.sessionId) return;
     this.stop();
     this.cwd = next;
     if (!next) return;
-    void this.setup(next);
+    this.sessionId = sessionId;
+    void this.setup(next, sessionId);
     this.schedule(0);
   }
 
@@ -47,20 +49,23 @@ export class RemoteBridgeService {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     this.cwd = null;
+    this.sessionId = null;
     this.failures = 0;
   }
 
-  private async setup(cwd: string): Promise<void> {
-    if (this.setupDone.has(cwd)) return;
-    this.setupDone.add(cwd);
+  private async setup(cwd: string, sessionId: string | null): Promise<void> {
+    // Per session: two sessions on the same folder may live on different hosts.
+    const key = `${sessionId ?? ''}\n${cwd}`;
+    if (this.setupDone.has(key)) return;
+    this.setupDone.add(key);
     try {
-      const res = await this.api.remoteBridgeSetup(cwd);
+      const res = await this.api.remoteBridgeSetup(cwd, sessionId);
       if (!res?.ok) {
-        this.setupDone.delete(cwd);
+        this.setupDone.delete(key);
         console.warn('[RemoteBridge] setup failed:', res?.error);
       }
     } catch (e) {
-      this.setupDone.delete(cwd);
+      this.setupDone.delete(key);
       console.warn('[RemoteBridge] setup failed:', e);
     }
   }
@@ -71,6 +76,7 @@ export class RemoteBridgeService {
 
   private async tick(): Promise<void> {
     const cwd = this.cwd;
+    const sessionId = this.sessionId;
     if (!cwd) return;
     // The previous session's collect is still running: try again shortly.
     // Returning without a reschedule stopped polling for good, because that
@@ -78,7 +84,7 @@ export class RemoteBridgeService {
     if (this.busy) { this.schedule(300); return; }
     this.busy = true;
     try {
-      const res = await this.api.remoteOutboxCollect(cwd, true);
+      const res = await this.api.remoteOutboxCollect(cwd, true, sessionId);
       if (res?.files?.length) void this.assets.loadAssets(cwd);
       this.failures = res?.ok ? 0 : this.failures + 1;
       if (!res?.ok) console.warn('[RemoteBridge] outbox:', res?.error);
@@ -88,7 +94,7 @@ export class RemoteBridgeService {
     } finally {
       this.busy = false;
     }
-    if (this.cwd !== cwd) return;
+    if (this.cwd !== cwd || this.sessionId !== sessionId) return;
     // Host unreachable (session in standby, network down): slow down.
     const delay = Math.min(RemoteBridgeService.POLL_MS * 2 ** this.failures, RemoteBridgeService.MAX_BACKOFF_MS);
     this.schedule(delay);

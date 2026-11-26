@@ -69,6 +69,40 @@ describe('session panels: stale answers and polls', () => {
     discardPeriodicTasks();
   }));
 
+  it('assets: remote calls carry the active session id only for its own folder', async () => {
+    const calls: Array<[string, string | null]> = [];
+    (window as any).promptops = {
+      listAssets: async (cwd: string, sessionId: string | null) => { calls.push([cwd, sessionId]); return { ok: true, assets: [] }; },
+    };
+    const svc = TestBed.inject(SessionAssetsService);
+    svc.setActiveSession('prod', 'cmd:///app');
+    await svc.loadAssets('cmd:///app');
+    await svc.loadAssets('cmd:///other');
+    svc.setActiveSession(null, null);
+    await svc.loadAssets('cmd:///app');
+    expect(calls).toEqual([['cmd:///app', 'prod'], ['cmd:///other', null], ['cmd:///app', null]]);
+  });
+
+  it('remote bridge sets up and polls each session on a shared folder with its own id', fakeAsync(() => {
+    const setups: Array<string | null> = [];
+    const collects: Array<string | null> = [];
+    (window as any).promptops = {
+      remoteBridgeSetup: async (_cwd: string, sessionId: string | null) => { setups.push(sessionId); return { ok: true }; },
+      remoteOutboxCollect: async (_cwd: string, _open: boolean, sessionId: string | null) => { collects.push(sessionId); return { ok: true, files: [] }; },
+    };
+    const bridge = TestBed.inject(RemoteBridgeService);
+    bridge.watch('cmd:///app', 'staging');
+    tick(0);
+    bridge.watch('cmd:///app', 'prod');
+    tick(0);
+    bridge.watch('cmd:///app', 'staging');
+    tick(0);
+    expect(setups).toEqual(['staging', 'prod']);
+    expect(collects).toEqual(['staging', 'prod', 'staging']);
+    bridge.stop();
+    discardPeriodicTasks();
+  }));
+
   it('review history poll stops after repeated failures', fakeAsync(() => {
     let calls = 0;
     (window as any).promptops = {

@@ -45,6 +45,18 @@ export class SessionAssetsService {
   /** Bumped by each loadAssets(): only the latest answer is shown. */
   private loadSeq = 0;
 
+  /** Active session of this window: tells the host apart when remote sessions share a folder. */
+  private active: { id: string; cwd: string } | null = null;
+
+  setActiveSession(id: string | null | undefined, cwd: string | null | undefined): void {
+    this.active = id && cwd ? { id, cwd } : null;
+  }
+
+  /** Id of the active session when `cwd` is its folder, so Rust reaches that session's host. */
+  sessionIdFor(cwd: string): string | null {
+    return this.active?.cwd === cwd ? this.active.id : null;
+  }
+
   /**
    * Path of an asset to hand to an agent. Local: absolute, because the agent
    * may work in a git worktree (claude --worktree, Codex, manual worktrees)
@@ -74,7 +86,7 @@ export class SessionAssetsService {
     const seq = ++this.loadSeq;
     this.loading.set(true);
     try {
-      const result = await this.api.listAssets(cwd);
+      const result = await this.api.listAssets(cwd, this.sessionIdFor(cwd));
       // A slower answer for the previous session must not replace this one's list.
       if (seq !== this.loadSeq) return;
       this.assets.set(result.ok ? (result.assets ?? []) : []);
@@ -97,7 +109,7 @@ export class SessionAssetsService {
       filePayloads.push({ name: file.name, dataBase64: base64 });
     }
 
-    const result = await this.api.uploadAssets(cwd, filePayloads);
+    const result = await this.api.uploadAssets(cwd, filePayloads, this.sessionIdFor(cwd));
     if (result.ok) {
       await this.loadAssets(cwd);
       const names = (result.assets as AssetInfo[]).map(a => a.name);
@@ -114,7 +126,7 @@ export class SessionAssetsService {
    */
   async importPaths(cwd: string, paths: string[]): Promise<AssetInfo[] | null> {
     if (typeof this.api.importAssetPaths !== 'function') return null;
-    const result = await this.api.importAssetPaths(cwd, paths);
+    const result = await this.api.importAssetPaths(cwd, paths, this.sessionIdFor(cwd));
     if (result.ok) {
       await this.loadAssets(cwd);
       const names = (result.assets as AssetInfo[]).map(a => a.name);
@@ -131,19 +143,19 @@ export class SessionAssetsService {
    */
   async importFromUrl(cwd: string, url: string, fileName: string): Promise<AssetInfo | null> {
     if (typeof this.api.importAssetFromUrl !== 'function') return null;
-    const result = await this.api.importAssetFromUrl(cwd, url, fileName);
+    const result = await this.api.importAssetFromUrl(cwd, url, fileName, this.sessionIdFor(cwd));
     if (result?.ok) return result.asset as AssetInfo;
     throw new Error(result?.error || this.unknownError());
   }
 
   async deleteAsset(cwd: string, fileName: string): Promise<void> {
-    const result = await this.api.deleteAsset(cwd, fileName);
+    const result = await this.api.deleteAsset(cwd, fileName, this.sessionIdFor(cwd));
     if (!result.ok) throw new Error(result.error || this.unknownError());
     this.assets.update(list => list.filter(a => a.name !== fileName));
   }
 
   async renameAsset(cwd: string, oldName: string, newName: string): Promise<AssetInfo> {
-    const result = await this.api.renameAsset(cwd, oldName, newName);
+    const result = await this.api.renameAsset(cwd, oldName, newName, this.sessionIdFor(cwd));
     if (result.ok) {
       await this.loadAssets(cwd);
       return result.asset;
@@ -152,7 +164,7 @@ export class SessionAssetsService {
   }
 
   async readAssetBase64(cwd: string, fileName: string): Promise<{ data: string; mimeType: string }> {
-    const result = await this.api.readAssetBase64(cwd, fileName);
+    const result = await this.api.readAssetBase64(cwd, fileName, this.sessionIdFor(cwd));
     if (result.ok) {
       return { data: result.data, mimeType: result.mimeType };
     }
@@ -168,7 +180,7 @@ export class SessionAssetsService {
    * or session-relative) into Downloads/PromptOps and open it locally.
    */
   async fetchRemoteFile(cwd: string, path: string, open = true): Promise<string> {
-    const result = await this.api.fetchRemoteFile(cwd, path, open);
+    const result = await this.api.fetchRemoteFile(cwd, path, open, this.sessionIdFor(cwd));
     if (result?.ok && result.localPath) return result.localPath;
     throw new Error(result?.error || this.unknownError());
   }
@@ -202,7 +214,7 @@ export class SessionAssetsService {
   }
 
   async readAssetText(cwd: string, fileName: string): Promise<string> {
-    const result = await this.api.readAsset(cwd, fileName);
+    const result = await this.api.readAsset(cwd, fileName, this.sessionIdFor(cwd));
     if (result.ok) {
       return result.content;
     }

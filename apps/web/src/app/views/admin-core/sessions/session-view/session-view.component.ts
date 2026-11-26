@@ -4366,10 +4366,12 @@ export class SessionViewComponent implements OnInit, OnDestroy {
     document.addEventListener('keydown', this.keyDownCapture, true);
     // Remote sessions: host ⇄ computer file bridge (MCP send_to_local + out/ box).
     effect(() => {
+      const session = this.activeSession();
+      const path = session?.workspace?.path ?? null;
+      untracked(() => this.sessionAssetsService.setActiveSession(session?.id, path));
       // Dedicated window: the remote outbox is collected (and consumed) only by the main window.
       if (this.dedicatedSessionId) return;
-      const path = this.activeSession()?.workspace?.path ?? null;
-      untracked(() => this.remoteBridge.watch(path));
+      untracked(() => this.remoteBridge.watch(path, session?.id ?? null));
     });
 
     // Ports: detection/auto-forward bound to the active session's folder.
