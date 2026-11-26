@@ -50,6 +50,7 @@ import { DesktopSessionApiService } from '../../app/views/admin-core/sessions/se
 import { SessionHistoryService } from '../../app/views/admin-core/sessions/services/session-history.service';
 import { WorkspaceApiService } from '../../app/views/admin-core/sessions/services/workspace-api.service';
 import { SidebarFoldersService } from '../../app/views/admin-core/sessions/services/sidebar-folders.service';
+import { RemoteBridgeService } from '../../app/views/admin-core/sessions/services/remote-bridge.service';
 import { isDetachedWindow, tauri } from '../../app/detached/detached-window';
 
 @Injectable()
@@ -635,6 +636,8 @@ export class SessionEffects {
    */
   private async validateSessionPaths(sessions: SessionSummary[]): Promise<void> {
     for (const session of sessions) {
+      // Remote folders live on the host: the local disk check would always fail.
+      if (RemoteBridgeService.isRemote(session.deviceWorkspace?.localPath)) continue;
       if (session.deviceWorkspace?.localPath && session.deviceWorkspace.status === 'configured') {
         try {
           const result = await this.sessionService.validateWorkspacePath(session.deviceWorkspace.localPath);
